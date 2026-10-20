@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# IDE & editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Antigravity agent
+.antigravity.toml
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Build artifacts (ZIP bisa di-rebuild via tools/buat_zip.py)
+geoconnect_ai.zip
+
+# QGIS symbology database (lokal)
+symbology-style.db

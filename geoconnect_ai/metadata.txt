@@ -1,0 +1,17 @@
+[general]
+name=GeoConnect-AI
+qgisMinimumVersion=3.28
+qgisMaximumVersion=4.99
+description=Otomatisasi Topologi Jaringan APP-SLTR-JTR-Gardu untuk Simulasi PSS SINCAL (PT PLN UID Kaltimtara)
+about=Plugin non-destruktif untuk otomatisasi snapping JTR ke Gardu, penyambungan dangling line, dan deteksi anomali APP serta usulan SLTR dalam satu klik.
+version=0.1.0
+author=GeoConnect-AI Team - Mahasiswa KP PT PLN UID Kaltimtara
+email=geoconnect.ai@pln.co.id
+repository=https://github.com/pln-uid-kaltimtara/geoconnect-ai
+tracker=https://github.com/pln-uid-kaltimtara/geoconnect-ai/issues
+category=Vector
+tags=electrical, network, topology, snapping, dangling, pln, sincal, jtr, gardu, app
+experimental=True
+deprecated=False
+icon=icon.png
+hasProcessingProvider=False
