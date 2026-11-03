@@ -63,10 +63,9 @@ def terapkan_style_app_anomali(layer_app: Any) -> bool:
 
     categories = []
 
-    # 1. Simbol ADA (Hijau)
     sym_ada = QgsMarkerSymbol.createSimple({
         "name": "circle",
-        "color": "#10B981", # Emerald green
+        "color": "#10B981",
         "outline_color": "#065F46",
         "outline_width": "0.4",
         "size": "2.2",
@@ -74,10 +73,9 @@ def terapkan_style_app_anomali(layer_app: Any) -> bool:
     cat_ada = QgsRendererCategory("ADA", sym_ada, "ADA (Tersambung)")
     categories.append(cat_ada)
 
-    # 2. Simbol TIDAK ADA (Merah anomali)
     sym_tidak_ada = QgsMarkerSymbol.createSimple({
         "name": "circle",
-        "color": "#EF4444", # Vibrant red
+        "color": "#EF4444",
         "outline_color": "#7F1D1D",
         "outline_width": "0.8",
         "size": "3.8",
@@ -93,12 +91,34 @@ def terapkan_style_app_anomali(layer_app: Any) -> bool:
 
 
 def terapkan_style_sltr_usulan(layer_sltr: Any) -> bool:
-    """Menerapkan garis oranye putus-putus untuk SLTR Usulan."""
+    """Menerapkan simbologi untuk SLTR (USULAN: garis oranye putus-putus, ASLI: garis kuning-emas/hijau muda solid)."""
     if layer_sltr is None or QgsLineSymbol is None:
         return False
 
+    if QgsCategorizedSymbolRenderer is not None and hasattr(layer_sltr, "fields") and layer_sltr.fields().indexOf("STATUS") != -1:
+        categories = []
+        sym_usulan = QgsLineSymbol.createSimple({
+            "color": "#F59E0B",  # Amber / Orange
+            "width": "0.75",
+            "line_style": "dash",
+        })
+        categories.append(QgsRendererCategory("USULAN", sym_usulan, "USULAN (SLTR Baru)"))
+
+        sym_asli = QgsLineSymbol.createSimple({
+            "color": "#65A30D",  # Lime / Olive Green untuk SLTR eksisting
+            "width": "0.45",
+            "line_style": "solid",
+        })
+        categories.append(QgsRendererCategory("ASLI", sym_asli, "ASLI (SLTR Eksisting Dataset)"))
+
+        renderer = QgsCategorizedSymbolRenderer("STATUS", categories)
+        layer_sltr.setRenderer(renderer)
+        if hasattr(layer_sltr, "triggerRepaint"):
+            layer_sltr.triggerRepaint()
+        return True
+
     sym_usulan = QgsLineSymbol.createSimple({
-        "color": "#F59E0B", # Amber / Orange
+        "color": "#F59E0B",  # Amber / Orange
         "width": "0.7",
         "line_style": "dash",
     })
@@ -107,6 +127,46 @@ def terapkan_style_sltr_usulan(layer_sltr: Any) -> bool:
         layer_sltr.setRenderer(QgsSingleSymbolRenderer(sym_usulan))
         if hasattr(layer_sltr, "triggerRepaint"):
             layer_sltr.triggerRepaint()
+    return True
+
+
+def terapkan_style_gardu(layer_gardu: Any) -> bool:
+    """Menerapkan simbol titik biru mencolok untuk Gardu Distribusi."""
+    if layer_gardu is None or QgsMarkerSymbol is None:
+        return False
+
+    sym_gardu = QgsMarkerSymbol.createSimple({
+        "name": "square",
+        "color": "#1D4ED8",  # Royal Blue
+        "outline_color": "#FFFFFF",
+        "outline_width": "0.7",
+        "size": "4.4",
+    })
+    if hasattr(layer_gardu, "setRenderer"):
+        from qgis.core import QgsSingleSymbolRenderer
+        layer_gardu.setRenderer(QgsSingleSymbolRenderer(sym_gardu))
+        if hasattr(layer_gardu, "triggerRepaint"):
+            layer_gardu.triggerRepaint()
+    return True
+
+
+def terapkan_style_tiang(layer_tiang: Any) -> bool:
+    """Menerapkan simbol titik tiang TR (lingkaran abu-abu tua/hitam dengan tepi putih)."""
+    if layer_tiang is None or QgsMarkerSymbol is None:
+        return False
+
+    sym_tiang = QgsMarkerSymbol.createSimple({
+        "name": "circle",
+        "color": "#334155",  # Slate Dark
+        "outline_color": "#F8FAFC",
+        "outline_width": "0.5",
+        "size": "2.8",
+    })
+    if hasattr(layer_tiang, "setRenderer"):
+        from qgis.core import QgsSingleSymbolRenderer
+        layer_tiang.setRenderer(QgsSingleSymbolRenderer(sym_tiang))
+        if hasattr(layer_tiang, "triggerRepaint"):
+            layer_tiang.triggerRepaint()
     return True
 
 
@@ -135,7 +195,6 @@ def terapkan_style_jtr_snapping(layer_jtr: Any) -> bool:
 
     categories = []
 
-    # SNAPPED: Garis hijau zamrud / cyan terang
     sym_snapped = QgsLineSymbol.createSimple({
         "color": "#06D6A0",
         "width": "0.8",
@@ -144,7 +203,6 @@ def terapkan_style_jtr_snapping(layer_jtr: Any) -> bool:
     cat_snapped = QgsRendererCategory("SNAPPED", sym_snapped, "SNAPPED (Bergeser ke Gardu)")
     categories.append(cat_snapped)
 
-    # UTUH: Garis biru dongker / abu-abu solid
     sym_utuh = QgsLineSymbol.createSimple({
         "color": "#475569",
         "width": "0.5",

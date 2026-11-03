@@ -253,10 +253,12 @@ class TestStylerDanLayerGroup(unittest.TestCase):
         self.assertEqual(warna_tidak_ada.lower(), "#ef4444")
 
         project = QgsProject.instance()
-        group = kelompokkan_layer(lyr_jtr, lyr_dangling, lyr_app, lyr_sltr, project=project)
+        group = kelompokkan_layer(
+            lyr_jtr, lyr_dangling, lyr_app, lyr_sltr, project=project, nama_master="SBJ0045"
+        )
 
         self.assertIsNotNone(group)
-        self.assertTrue(group.name().startswith("GeoConnect-AI - Hasil"))
+        self.assertEqual(group.name(), "SBJ0045_done")
         self.assertEqual(len(group.children()), 4)
 
         child_layers = [child.layer() for child in group.children()]
@@ -341,7 +343,6 @@ class TestPipelineDanUI(unittest.TestCase):
     """Pengujian orkestrasi pipeline menyeluruh dan integrasi antarmuka UI."""
 
     def test_pipeline_end_to_end_dan_keutuhan_data_sumber(self):
-        # 1. Buat data layer sumber lengkap
         lyr_gardu = QgsVectorLayer("Point?crs=EPSG:32750", "Gardu_Test", "memory")
         pr_g = lyr_gardu.dataProvider()
         pr_g.addAttributes([QgsField("ID", QVariant.String, len=50)])
@@ -352,7 +353,6 @@ class TestPipelineDanUI(unittest.TestCase):
         pr_j = lyr_jtr.dataProvider()
         pr_j.addAttributes([QgsField("ID", QVariant.String, len=50)])
         lyr_jtr.updateFields()
-        # JTR-01 dekat Gardu (jarak 4.0 m), JTR-02 dangling dekat JTR-01 (jarak 3.0 m)
         pr_j.addFeatures([
             buat_fitur_garis(1, [(4.0, 0.0), (50.0, 0.0)], "JTR-01"),
             buat_fitur_garis(2, [(53.0, 0.0), (100.0, 0.0)], "JTR-02"),
@@ -363,8 +363,8 @@ class TestPipelineDanUI(unittest.TestCase):
         pr_a.addAttributes([QgsField("ID", QVariant.String, len=50)])
         lyr_app.updateFields()
         pr_a.addFeatures([
-            buat_fitur_titik(1, 20.0, 0.1, "APP-01"), # ADA (0.1 m <= 0.5 m)
-            buat_fitur_titik(2, 20.0, 8.0, "APP-02"), # TIDAK ADA (8 m <= 50 m) -> USULAN
+            buat_fitur_titik(1, 20.0, 0.1, "APP-01"),
+            buat_fitur_titik(2, 20.0, 8.0, "APP-02"),
         ])
 
         wkt_gardu_asli = [f.geometry().asWkt() for f in lyr_gardu.getFeatures()]
@@ -395,20 +395,17 @@ class TestPipelineDanUI(unittest.TestCase):
         def on_prog(p, t):
             progress_calls.append((p, t))
 
-        # 2. Jalankan pipeline
         hasil = jalankan_pipeline(cfg, progress_cb=on_prog)
 
         self.assertTrue(hasil.sukses)
         self.assertGreaterEqual(len(progress_calls), 8)
         self.assertEqual(progress_calls[-1][0], 100)
 
-        # 3. Verifikasi hasil pemrosesan
         self.assertEqual(hasil.ringkasan["jtr_snapped"], 1)
         self.assertEqual(hasil.ringkasan["app_ada"], 1)
         self.assertEqual(hasil.ringkasan["app_tidak_ada"], 1)
         self.assertEqual(hasil.ringkasan["sltr_usulan_dibuat"], 1)
 
-        # 4. Verifikasi KEUTUHAN DATA SUMBER (Non-destruktif)
         wkt_gardu_sesudah = [f.geometry().asWkt() for f in lyr_gardu.getFeatures()]
         wkt_jtr_sesudah = [f.geometry().asWkt() for f in lyr_jtr.getFeatures()]
         wkt_app_sesudah = [f.geometry().asWkt() for f in lyr_app.getFeatures()]
@@ -427,6 +424,143 @@ class TestPipelineDanUI(unittest.TestCase):
         # Tombol jalankan default disable jika layer belum dipilih
         self.assertFalse(dlg.btn_jalankan.isEnabled())
         dlg.close()
+
+
+class TestDatasetAsliSBJ0045(unittest.TestCase):
+    """Pengujian langsung terhadap dataset nyata PT PLN UID Kaltimtara: Gardu SBJ0045."""
+
+    def setUp(self):
+        self.sbj_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "SBJ0045")
+        )
+        if not os.path.exists(self.sbj_dir):
+            self.skipTest("Folder dataset SBJ0045 tidak ditemukan.")
+
+        self.lyr_gardu = QgsVectorLayer(
+            os.path.join(self.sbj_dir, "SBJ0045_GARDU.gpkg"), "SBJ0045_GARDU", "ogr"
+        )
+        self.lyr_jtr = QgsVectorLayer(
+            os.path.join(self.sbj_dir, "SBJ0045_JTR.gpkg"), "SBJ0045_JTR", "ogr"
+        )
+        self.lyr_sltr = QgsVectorLayer(
+            os.path.join(self.sbj_dir, "SBJ0045_SLTR.gpkg"), "SBJ0045_SLTR", "ogr"
+        )
+        self.lyr_app = QgsVectorLayer(
+            os.path.join(self.sbj_dir, "SBJ0045_APP1.gpkg"), "SBJ0045_APP1", "ogr"
+        )
+        self.lyr_tiang = QgsVectorLayer(
+            os.path.join(self.sbj_dir, "SBJ0045_TIANG.gpkg"), "SBJ0045_TIANG", "ogr"
+        )
+
+    def test_sbj0045_dengan_sltr_dan_tanpa_sltr(self):
+        self.assertTrue(self.lyr_gardu.isValid())
+        self.assertTrue(self.lyr_jtr.isValid())
+        self.assertTrue(self.lyr_sltr.isValid())
+        self.assertTrue(self.lyr_app.isValid())
+        self.assertTrue(self.lyr_tiang.isValid())
+
+        # 1. Uji dengan layer SLTR asli & Tiang (semua 189 APP terdeteksi ADA, 189 SLTR asli & 10 Tiang ikut ter-copy ke hasil)
+        cfg_full = PipelineConfig(
+            layer_gardu=self.lyr_gardu,
+            layer_jtr=self.lyr_jtr,
+            layer_sltr=self.lyr_sltr,
+            layer_app=self.lyr_app,
+            layer_tiang=self.lyr_tiang,
+            toleransi=ToleransiConfig(
+                jtr_gardu_m=10.0,
+                dangling_m=8.0,
+                app_cover_m=0.5,
+                app_usulan_maks_m=50.0,
+            ),
+        )
+        hasil_full = jalankan_pipeline(cfg_full)
+        self.assertTrue(hasil_full.sukses)
+        self.assertEqual(hasil_full.nama_grup_hasil, "SBJ0045_done")
+        self.assertEqual(hasil_full.ringkasan["total_data_valid"], 394)
+        self.assertEqual(hasil_full.ringkasan["jtr_snapped"], 2)
+        self.assertEqual(hasil_full.ringkasan["app_total"], 189)
+        self.assertEqual(hasil_full.ringkasan["app_ada"], 189)
+        self.assertEqual(hasil_full.ringkasan["app_tidak_ada"], 0)
+        self.assertEqual(hasil_full.ringkasan["sltr_asli_disalin"], 189)
+        self.assertEqual(hasil_full.ringkasan["tiang_disalin"], 10)
+        self.assertIsNotNone(hasil_full.layer_tiang_hasil)
+        self.assertEqual(hasil_full.layer_tiang_hasil.featureCount(), 10)
+        self.assertEqual(hasil_full.layer_sltr_usulan.featureCount(), 189)
+
+        # Snapping tidak boleh memutus SLTR & Tiang: setiap ujung SLTR asli dan setiap
+        # Tiang yang semula menempel pada JTR harus tetap menempel pada JTR hasil snapping.
+        geom_jtr_hasil = QgsGeometry.unaryUnion(
+            [f.geometry() for f in hasil_full.layer_jtr_snapped.getFeatures()]
+        )
+        metode = {f["METODE"] for f in hasil_full.layer_jtr_snapped.getFeatures()}
+        self.assertIn("SAMBUNG_TIANG", metode)
+        for f_t in hasil_full.layer_tiang_hasil.getFeatures():
+            self.assertLess(geom_jtr_hasil.distance(f_t.geometry()), 0.01)
+
+        # Ujung SLTR yang semula menempel di vertex JTR asli tetap menempel setelah snapping
+        from qgis.core import QgsCoordinateTransform
+        tr = QgsCoordinateTransform(
+            self.lyr_jtr.crs(), hasil_full.layer_jtr_snapped.crs(), QgsProject.instance()
+        )
+        geom_jtr_asli = QgsGeometry.unaryUnion([
+            QgsGeometry(f.geometry()) for f in self.lyr_jtr.getFeatures()
+        ])
+        geom_jtr_asli.transform(tr)
+        for f_s in hasil_full.layer_sltr_usulan.getFeatures():
+            pts = f_s.geometry().asPolyline()
+            for p in (pts[0], pts[-1]):
+                g_p = QgsGeometry.fromPointXY(p)
+                if geom_jtr_asli.distance(g_p) < 0.01:
+                    self.assertLess(geom_jtr_hasil.distance(g_p), 0.01)
+
+        # Pastikan ID_APP unik (IDPELANGGAN, bukan KODE_GARDU)
+        id_apps = [
+            f["ID_APP"] for f in hasil_full.layer_app_anomali.getFeatures()
+        ]
+        self.assertEqual(len(set(id_apps)), 189)
+        self.assertNotIn("GD SBJ0045", id_apps)
+
+        # Pastikan ID_JTR unik (description segmen SUTR, bukan location_gardu)
+        id_jtrs = [
+            f["ID_JTR"] for f in hasil_full.layer_jtr_snapped.getFeatures()
+        ]
+        self.assertEqual(len(set(id_jtrs)), 5)
+
+        # 2. Uji skenario tanpa SLTR (untuk menguji generator SLTR Usulan ke 5 segmen JTR aktif SBJ0045)
+        cfg_no_sltr = PipelineConfig(
+            layer_gardu=self.lyr_gardu,
+            layer_jtr=self.lyr_jtr,
+            layer_sltr=None,
+            layer_app=self.lyr_app,
+            toleransi=ToleransiConfig(
+                jtr_gardu_m=10.0,
+                dangling_m=8.0,
+                app_cover_m=0.5,
+                app_usulan_maks_m=50.0,
+            ),
+        )
+        hasil_no_sltr = jalankan_pipeline(cfg_no_sltr)
+        self.assertTrue(hasil_no_sltr.sukses)
+        self.assertEqual(hasil_no_sltr.ringkasan["app_tidak_ada"], 189)
+        # Karena semua 5 segmen JTR terhubung (termasuk T-junction JTR 2, JTR 4, JTR 5),
+        # maka 130 APP yang berjarak <= 50m ke 5 segmen JTR aktif harus mendapat SLTR Usulan!
+        self.assertEqual(hasil_no_sltr.ringkasan["sltr_usulan_dibuat"], 130)
+        self.assertEqual(hasil_no_sltr.ringkasan["app_tanpa_usulan"], 59)
+
+    def test_dialog_auto_deteksi_layer_sbj0045(self):
+        """Dropdown harus memilih layer sesuai perannya (bukan layer pertama default)."""
+        prj = QgsProject.instance()
+        prj.removeAllMapLayers()
+        for lyr in (self.lyr_app, self.lyr_gardu, self.lyr_jtr, self.lyr_sltr, self.lyr_tiang):
+            prj.addMapLayer(QgsVectorLayer(lyr.source(), lyr.name(), "ogr"))
+        dlg = GeoConnectAIDialog()
+        self.assertEqual(dlg.cbo_app.currentLayer().name(), "SBJ0045_APP1")
+        self.assertEqual(dlg.cbo_gardu.currentLayer().name(), "SBJ0045_GARDU")
+        self.assertEqual(dlg.cbo_jtr.currentLayer().name(), "SBJ0045_JTR")
+        self.assertEqual(dlg.cbo_sltr.currentLayer().name(), "SBJ0045_SLTR")
+        self.assertEqual(dlg.cbo_tiang.currentLayer().name(), "SBJ0045_TIANG")
+        dlg.close()
+        prj.removeAllMapLayers()
 
 
 if __name__ == "__main__":

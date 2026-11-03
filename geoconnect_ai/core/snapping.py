@@ -50,6 +50,8 @@ def auto_snap_jtr_ke_gardu(
     field_id_jtr: Optional[str] = None,
     field_id_gardu: Optional[str] = None,
     crs: Optional[Any] = None,
+    titik_jangkar: Optional[List[Any]] = None,
+    epsilon_jangkar_m: float = 0.05,
 ) -> HasilSnapping:
     """Melakukan auto-snapping ujung segmen JTR ke Gardu distribusi terdekat.
 
@@ -63,6 +65,11 @@ def auto_snap_jtr_ke_gardu(
         field_id_jtr: Nama kolom ID untuk JTR.
         field_id_gardu: Nama kolom ID untuk Gardu.
         crs: CRS kerja terproyeksi (meter).
+        titik_jangkar: Titik QgsPointXY yang menempel pada JTR (Tiang TR & ujung SLTR).
+            Jika ujung JTR berimpit dengan titik jangkar, ujung tersebut TIDAK digeser,
+            melainkan JTR diperpanjang ke Gardu (vertex Gardu disisipkan) sehingga
+            SLTR dan Tiang tetap tersambung pada JTR.
+        epsilon_jangkar_m: Toleransi berimpit ujung JTR dengan titik jangkar.
 
     Returns:
         HasilSnapping: Objek berisi layer hasil memory dan statistik snapping.
@@ -70,13 +77,12 @@ def auto_snap_jtr_ke_gardu(
     hasil = HasilSnapping()
     auth_id = crs.authid() if (crs and hasattr(crs, "authid")) else "EPSG:32750"
 
-    # 1. Bangun spatial index titik Gardu
     index_gardu = QgsSpatialIndex() if QgsSpatialIndex else None
     dict_gardu_pt: Dict[Any, QgsPointXY] = {}
     dict_gardu_id: Dict[Any, Any] = {}
 
     for g_idx, g in enumerate(daftar_gardu, start=1):
-        gid_val = ambil_nilai_id(g, field_id_gardu)
+        gid_val = ambil_nilai_id(g, field_id_gardu, jenis="GARDU")
         fid = g.id() if hasattr(g, "id") and g.id() > 0 else g_idx
         geom = g.geometry() if hasattr(g, "geometry") else None
         if geom is None or geom.isNull() or geom.isEmpty():
@@ -93,6 +99,24 @@ def auto_snap_jtr_ke_gardu(
             g_feature.setId(fid)
             index_gardu.addFeature(g_feature)
 
+    # Grid hash titik jangkar (Tiang / ujung SLTR) agar pengecekan berimpit O(1)
+    eps_j = max(float(epsilon_jangkar_m), 1e-6)
+    grid_jangkar: Dict[Tuple[int, int], List[Any]] = {}
+    for pj in titik_jangkar or []:
+        kunci_g = (int(pj.x() // eps_j), int(pj.y() // eps_j))
+        grid_jangkar.setdefault(kunci_g, []).append(pj)
+
+    def ujung_terjangkar(pt: Any) -> bool:
+        if not grid_jangkar:
+            return False
+        cx, cy = int(pt.x() // eps_j), int(pt.y() // eps_j)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for pj in grid_jangkar.get((cx + dx, cy + dy), []):
+                    if ((pt.x() - pj.x()) ** 2 + (pt.y() - pj.y()) ** 2) ** 0.5 <= eps_j:
+                        return True
+        return False
+
     # Buat layer memori untuk hasil JTR Snapping
     layer_snapped = None
     if QgsVectorLayer is not None:
@@ -105,14 +129,14 @@ def auto_snap_jtr_ke_gardu(
         fields.append(QgsField("STATUS", QVariant.String if QVariant else 10, len=10))
         fields.append(QgsField("ID_GARDU", QVariant.String if QVariant else 10, len=50))
         fields.append(QgsField("JARAK_M", QVariant.Double if QVariant else 6, prec=3))
+        fields.append(QgsField("METODE", QVariant.String if QVariant else 10, len=20))
         pr.addAttributes(fields)
         layer_snapped.updateFields()
 
     daftar_fitur_baru = []
 
-    # 2. Proses tiap segmen JTR
     for idx_jtr, jtr in enumerate(daftar_jtr, start=1):
-        jid_val = ambil_nilai_id(jtr, field_id_jtr)
+        jid_val = ambil_nilai_id(jtr, field_id_jtr, jenis="JTR")
         geom = jtr.geometry() if hasattr(jtr, "geometry") else None
         if geom is None or geom.isNull() or geom.isEmpty():
             continue
@@ -130,6 +154,7 @@ def auto_snap_jtr_ke_gardu(
         ter_snap = False
         id_gardu_terpilih = None
         jarak_snap_terpilih = 0.0
+        metode_snap = ""
 
         for idx_ujung in (0, -1):
             pt_ujung = pts_baru[idx_ujung]
@@ -164,7 +189,18 @@ def auto_snap_jtr_ke_gardu(
 
             if terdekat_fid is not None:
                 pt_gardu = dict_gardu_pt[terdekat_fid]
-                pts_baru[idx_ujung] = QgsPointXY(pt_gardu.x(), pt_gardu.y())
+                pt_gardu_baru = QgsPointXY(pt_gardu.x(), pt_gardu.y())
+                if min_jarak > eps_j and ujung_terjangkar(pt_ujung):
+                    # Sisipkan vertex agar tiang/SLTR yang menempel tidak terlepas
+                    if idx_ujung == 0:
+                        pts_baru.insert(0, pt_gardu_baru)
+                    else:
+                        pts_baru.append(pt_gardu_baru)
+                    metode_snap = "SAMBUNG_TIANG"
+                else:
+                    pts_baru[idx_ujung] = pt_gardu_baru
+                    if metode_snap != "SAMBUNG_TIANG":
+                        metode_snap = "GESER"
                 ter_snap = True
                 id_gardu_terpilih = dict_gardu_id[terdekat_fid]
                 jarak_snap_terpilih = min_jarak
@@ -180,6 +216,7 @@ def auto_snap_jtr_ke_gardu(
                 status_str,
                 str(id_gardu_terpilih) if id_gardu_terpilih is not None else "",
                 round(jarak_snap_terpilih, 3),
+                metode_snap,
             ])
             daftar_fitur_baru.append(f_baru)
 
@@ -193,6 +230,7 @@ def auto_snap_jtr_ke_gardu(
             "status": status_str,
             "id_gardu": id_gardu_terpilih,
             "jarak_m": round(jarak_snap_terpilih, 3),
+            "metode": metode_snap,
             "geom_baru": geom_baru,
         })
 
